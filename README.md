@@ -1,138 +1,239 @@
-## Use Case: Crowd Anomaly Detection
+# Crowd Anomaly Detection
 
+**Flag unusual events in pedestrian-scene surveillance video by learning what "normal" motion looks like.**
+
+[![GitHub](https://img.shields.io/badge/GitHub-Repository-181717?style=for-the-badge&logo=github)](https://github.com/sanjeebtiwary/Crowd-Anomaly-Detection)
+![Python](https://img.shields.io/badge/Python-3.9%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)
+![OpenCV](https://img.shields.io/badge/OpenCV-Optical%20Flow-5C3EE8?style=for-the-badge&logo=opencv&logoColor=white)
+![scikit-learn](https://img.shields.io/badge/scikit--learn-GMM-F7931E?style=for-the-badge&logo=scikitlearn&logoColor=white)
+![Tests](https://img.shields.io/badge/tests-14%20passing-2EA44F?style=for-the-badge)
+
+---
+
+## Contents
+
+[Overview](#overview) · [How it works](#how-it-works) · [Quick start](#quick-start) · [Dataset](#dataset) · [Usage](#usage) · [Configuration](#configuration) · [Project structure](#project-structure) · [Testing](#testing) · [What changed](#what-changed-from-the-original-notebook) · [Limitations](#limitations) · [Roadmap](#roadmap) · [References](#references) · [License](#license)
 
 ## Overview
-This project is part of our efforts in solving problems in densely crowded environments analysis. Following our previous topics in classifying crowd states, segmenting videos into components, estimating crowd size and tracking objects in crowds, the goal here is to detect the deviations from normal crowd behaviors, which is motivated by the ubiquity of camera surveillance systems, the challenges in modeling crowd behaviors, and the importance of automatic crowd monitoring for various applications.
 
-Anomaly detection is an active area of research on its own. Various approaches have been proposed, for both crowded and non-crowded scenes. Existing approaches focus uniquely on motion information, ignoring abnormality information due to variations of object appearance. This makes them impervious to abnormalities that do not involve motion outliers, e.g., a truck that crosses a bridge with weight restrictions. Furthermore, descriptors such as optical flow, pixel change histograms, or other traditional background subtraction operations, are difficult for crowded scenes, where the background is by definition dynamic, of widespread clutter, and complicated occlusions.
+Abnormal events in crowds can't be enumerated in advance, so this project uses a **one-class** approach: fit a model on *normal-only* footage, then score how far new observations deviate from it. In the UCSD data, anomalies include **bikers, skaters, carts and wheelchairs** on a pedestrian walkway, and unusual pedestrian motion.
 
-anomaly detection and localization can be broken down into two sub-problems:
-- How to characterize crowd behaviors
-- How to measure the "anomaly score" of a specific behavior.
+It provides:
 
-For the first issue, we propose to model motion patterns in crowds via the use of mixture of dynamic textures (MDT), which is a unified description capturing both the appearance and dynamics of visual processes. In the second part, instead of directly modeling the anomalous behavior itself, the normalcy is first learnt, and then the "anomaly score" of an observation is computed by measuring the difference from the normalcy model. Specifically, two components are proposed to reflect the normalcy in different perspectives.  
+- a reusable Python package (`crowd_anomaly/`) and a command line (`train`, `evaluate`, `predict`, `demo`)
+- frame-level evaluation (ROC-AUC, EER, precision/recall) with plots
+- anomaly **localization overlays**: annotated output video highlights the cells that look unusual
+- models that accept **any video** (`.avi`, `.mp4`, ...) or folder of frames, resized automatically
+- a test suite and a synthetic-data demo that runs without downloading anything
 
-<p float="center">
- <img src="https://github.com/priyanka011011/Crowd-Anomaly-Detection/assets/63203112/1ba3d710-e01f-47b2-b23f-442a815a80bc" width="45%" />
- <img src="https://github.com/priyanka011011/Crowd-Anomaly-Detection/assets/63203112/1b8fafa8-0689-47b5-9e9f-d17d37fc899b" width="45%" />
-</p>
+> **Results.** No UCSD accuracy figures are published here yet. Run `train --evaluate` on your copy of the data and report your own numbers (see [Roadmap](#roadmap)). The bundled demo uses synthetic data and says nothing about UCSD performance.
 
-## Methodology
-The methodology for anomaly detection in crowded environments, involves two main components: characterizing crowd behaviors and measuring the "anomaly score" of specific behaviors. Here is an overview of the proposed methodology:
+## How it works
 
-- <u>Mixture of Dynamic Textures (MDT)</u>: The project suggests using MDT to model motion patterns in crowds. MDT is a unified description that captures both the appearance and dynamics of visual processes in crowded scenes.
+```mermaid
+flowchart LR
+    A[Video / frames] --> B[Grayscale, resize, blur]
+    B --> C[Dense optical flow<br/>Farneback]
+    C --> D[Pool on grid:<br/>mean dx, dy, magnitude per cell]
+    D --> E[Gaussian mixture fit on<br/>NORMAL training cells]
+    E --> F[Cell score =<br/>negative log-likelihood]
+    F --> G[Frame score =<br/>mean of top-k cells,<br/>temporally smoothed]
+    G --> H{score > threshold?}
+    H -- yes --> I[Flag frame + highlight cells]
+    H -- no --> J[Normal]
+```
 
-MDT captures the complexity and dynamics of crowded scenes by considering the spatial and temporal variations in the video data. It helps in modeling the visual processes and behaviors exhibited by the crowd.
-- <u> Measuring Anomaly Score </u>:
+1. **Features.** For each pair of consecutive frames, dense Farneback optical flow is pooled on a `6 x 8` grid. Each cell keeps `[mean dx, mean dy, mean magnitude]`.
+2. **Normality model.** Every cell of every training frame is a sample `[dx, dy, magnitude, y, x]`. Position is included because motion near the camera looks different from motion far away (perspective). A `StandardScaler` and a `GaussianMixture` are fitted on these samples.
+3. **Scoring.** A cell's anomaly score is its negative log-likelihood (higher = more unusual). The frame score is the mean of the `top_k` highest cell scores, then smoothed over time, so a single moving object is not drowned out by a mostly static scene.
+4. **Thresholding.** Whole training clips are held out (never individual frames) and the threshold is the 99th percentile of their scores, i.e. it targets roughly a 1% false-alarm rate on normal footage.
 
-   - <u> Learning Normalcy </u>: The methodology involves learning the normal behavior of the crowd first. This is done by modeling the expected patterns, motion, and  appearance characteristics of a typical crowd behavior.
+> **Naming.** The original notebook called this "MDT". The papers' Mixture of Dynamic Textures is a mixture of linear dynamical systems over appearance and dynamics. This project implements a simpler **optical-flow + Gaussian mixture** model that follows the same "learn normal, score deviation" principle but is *not* a reimplementation of the papers' MDT.
 
-   - <u> Anomaly Score Computation </u>: Once the normalcy model is established, the anomaly score of an observation or behavior is computed by measuring the difference or deviation from the normalcy model.
+## Quick start
 
-   - <u> Two Components of Normalcy </u>: The methodology proposes two components to reflect the normalcy from different perspectives, although the specific details of these components are not mentioned in the given information.
+```bash
+git clone https://github.com/sanjeebtiwary/Crowd-Anomaly-Detection.git
+cd Crowd-Anomaly-Detection
 
-The combination of characterizing crowd behaviors using MDT and measuring the anomaly score based on the deviation from the normalcy model enables the detection of deviations from normal crowd behaviors in densely crowded environments.
+python -m venv .venv
+source .venv/bin/activate            # Windows: .venv\Scripts\Activate.ps1
+pip install -r requirements.txt
 
-## Business Segments
-Anomaly detection in crowded environments, the potential business segments that could benefit from this technology include:
+python -m crowd_anomaly demo         # ~10 s smoke test on synthetic data, no download needed
+```
 
-- Security and Surveillance: Anomaly detection in crowded scenes can significantly enhance security and surveillance systems. It can help identify suspicious or abnormal behavior in real-time, enabling early detection of potential threats or criminal activities.
+The demo trains on a tiny synthetic dataset, evaluates, and writes metrics, plots and an annotated video to a temp folder (path is printed).
 
-- Transportation and Infrastructure: Monitoring crowded transportation hubs, such as airports, train stations, or bus terminals, can be crucial for ensuring smooth operations and passenger safety. Anomaly detection can help identify unusual or abnormal crowd behaviors that may indicate congestion, security breaches, or other issues requiring intervention.
+## Dataset
 
-- Event Management: Anomaly detection can be valuable in managing large-scale events, such as concerts, festivals, or sports games. It can help organizers identify and respond to crowd-related incidents, such as overcrowding, unauthorized access, or potentially dangerous situations, improving crowd safety and overall event experience.
+**[UCSD Anomaly Detection Dataset (Kaggle)](https://www.kaggle.com/datasets/orvile/ucsd-anomaly-dataset/data)** - a stationary, elevated camera over pedestrian walkways. Training clips are normal; test clips contain anomalies.
 
-- Retail and Commercial Spaces: Detecting anomalies in crowded retail environments can assist in loss prevention, identifying suspicious activities, or unusual behaviors that may indicate theft, shoplifting, or other security concerns. It can also provide insights into customer behavior patterns and optimize store layouts.
+| Subset | Scene | Train clips | Test clips | Frame size |
+|---|---|---:|---:|---|
+| **Ped1** | People walking toward/away from the camera (perspective distortion) | 34 | 36 | 238 x 158 |
+| **Ped2** | Movement parallel to the camera plane | 16 | 12 | 360 x 240 |
 
-- Crowd Control and Safety: Anomaly detection technology can be applied to ensure crowd control and safety in public spaces, including city centers, parks, or tourist attractions. It can help monitor crowd density, detect overcrowding situations, and identify potential safety risks or emergencies in real-time.
+Clips are ~200 frames of `.tif` images. Ground truth: a frame-level flag for every test clip (the `UCSDpedX.m` file) and pixel masks (`TestXXX_gt/`) for a subset.
 
-- Public Safety and Law Enforcement: Anomaly detection can support law enforcement agencies in public safety efforts, such as crowd management during protests, demonstrations, or public gatherings. It can assist in identifying unusual crowd behaviors, potential threats, or criminal activities, aiding in proactive and timely responses.
+Download and extract it anywhere. `--data-root` may point at the download folder, `UCSD_Anomaly_Dataset`, or the subset folder itself; the code finds `UCSDped1` / `UCSDped2` automatically:
 
-- Smart City Applications: Anomaly detection in crowded environments aligns with the concept of smart cities, where data-driven technologies are leveraged to enhance urban management. It can contribute to intelligent urban planning, traffic optimization, and overall safety and security in densely populated areas.
+```text
+UCSD_Anomaly_Dataset/
+├── UCSDped1/
+│   ├── Train/Train001/001.tif ...        Train034/
+│   └── Test/Test001/ ... Test036/        (+ Test0XX_gt/ masks, + UCSDped1.m)
+└── UCSDped2/ ...
+```
 
-- These business segments highlight potential applications of anomaly detection technology in various industries where monitoring crowded scenes and identifying deviations from normal behaviors is critical for operational efficiency, safety, and security.
+<table>
+  <tr>
+    <td align="center" width="50%"><strong>Cart</strong><br><img src="https://github.com/priyanka011011/Crowd-Anomaly-Detection/assets/63203112/92aff7f9-a790-472d-b7f9-4211e4cf9147" alt="Cart anomaly in Ped1" width="100%"></td>
+    <td align="center" width="50%"><strong>Wheelchair</strong><br><img src="https://github.com/priyanka011011/Crowd-Anomaly-Detection/assets/63203112/fe32f054-303d-44cb-bf29-2e7d6791beb9" alt="Wheelchair anomaly in Ped1" width="100%"></td>
+  </tr>
+  <tr>
+    <td align="center" width="50%"><strong>Skater</strong><br><img src="https://github.com/priyanka011011/Crowd-Anomaly-Detection/assets/63203112/5c060288-5138-43a0-9d24-787c8531a061" alt="Skater anomaly in Ped1" width="100%"></td>
+    <td align="center" width="50%"><strong>Biker</strong><br><img src="https://github.com/priyanka011011/Crowd-Anomaly-Detection/assets/63203112/785b87bc-5a75-42ff-baad-4e949e10269f" alt="Biker anomaly in Ped1" width="100%"></td>
+  </tr>
+</table>
 
+## Usage
 
-## Objective
-The objective of the project is to detect deviations from normal crowd behaviors in densely crowded environments. The motivation behind this objective is the prevalence of camera surveillance systems, the challenges in modeling crowd behaviors, and the importance of automatic crowd monitoring for various applications.
+### 1. Train (and optionally evaluate)
 
-# Model
-The proposed approach for anomaly detection in crowded scenes involves two main components: characterizing crowd behaviors and measuring the "anomaly score" of a specific behavior.
+```bash
+python -m crowd_anomaly train \
+    --data-root /path/to/UCSD_Anomaly_Dataset --subset ped1 \
+    --model-out models/ped1.joblib --evaluate --jobs -1
+```
 
-- Characterizing Crowd Behaviors: The project suggests using a mixture of dynamic textures (MDT) to model motion patterns in crowds. MDT provides a unified description that captures both the appearance and dynamics of visual processes in crowded scenes.
+Useful options: `--components 12`, `--auto-components` (choose by BIC), `--grid 8 12`, `--top-k 5`, `--val-fraction 0.2`, `--max-clips 10` (quick experiments), `--seed 0`.
 
-- Measuring Anomaly Score: Instead of directly modeling anomalous behavior, the project proposes learning the normalcy first. The normal behavior is modeled, and then the    "anomaly score" of an observation is computed by measuring the difference from the normalcy model. Two components are introduced to reflect the normalcy from different perspectives.
+### 2. Evaluate
 
-# Predictions Format:
-The specific format for predictions or outputs generated by the anomaly detection system is not mentioned in the given information. However, it can be inferred that the output would include anomaly scores for observations or behaviors in crowded scenes. The anomaly score indicates the degree of deviation from normal crowd behaviors, helping to identify abnormal events or occurrences in real-time monitoring scenarios.
+```bash
+python -m crowd_anomaly evaluate --data-root /path/to/UCSD_Anomaly_Dataset \
+    --subset ped1 --model models/ped1.joblib --report-dir reports/ped1
+```
 
-# Anomaly Detection Dataset
+Writes `metrics.json` (AUC, EER, average precision, precision/recall/F1 at the calibrated threshold, per-clip AUC), `roc.png` and `timelines.png`. AUC and EER are computed over frames pooled across all labelled test clips, the usual UCSD frame-level protocol.
 
-The Anomaly Detection Dataset was acquired with a stationary camera mounted at an elevation, overlooking pedestrian walkways. The crowd density in the walkways was variable, ranging from sparse to very crowded. In the normal setting, the video contains only pedestrians. Abnormal events are due to either:
-               - the circulation of non pedestrian entities in the walkways
-               - anomalous pedestrian motion patterns
-Commonly occurring anomalies include bikers, skaters, small carts, and people walking across a walkway or in the grass that surrounds it. A few instances of people in wheelchair were also recorded. All abnormalities are naturally occurring, i.e. they were not staged for the purposes of assembling the dataset. The data was split into 2 subsets, each corresponding to a different scene. The video footage recorded from each scene was split into various clips of around 200 frames.
+### 3. Predict on a video or folder of frames
 
-- Peds1: clips of groups of people walking towards and away from the camera, and some amount of perspective distortion. Contains 34 training video samples and 36 testing video samples.
+```bash
+python -m crowd_anomaly predict --source test.avi --model models/ped1.joblib --out outputs/
+# or the original entry point, which defaults to test.avi + models/model.joblib:
+python load_predict.py
+```
 
-- Peds2: scenes with pedestrian movement parallel to the camera plane. Contains 16 training video samples and 12 testing video samples.
+Outputs: `scores.csv` (`frame, score, threshold, is_anomaly`), `scores.png` (score timeline with flagged segments shaded), and `annotated.mp4` (red border and label on flagged frames, red tint on unusual cells). The console lists anomalous frame ranges; segments shorter than `--min-segment` frames (default 3) are not reported.
 
-For each clip, the ground truth annotation includes a binary flag per frame, indicating whether an anomaly is present at that frame. In addition, a subset of 10 clips for Peds1 and 12 clips for Peds2 are provided with manually generated pixel-level binary masks, which identify the regions containing anomalies. This is intended to enable the evaluation of performance with respect to ability of algorithms to localize anomalies.
+### 4. Use it from Python
 
-Dataset Download
-- [UCSD Anomaly Detection Dataset](https://drive.google.com/drive/folders/1uEDcZTREx5Ysy1TvE_FugLcDK1vhPFmk?usp=sharing)
+```python
+from crowd_anomaly import Config, CrowdAnomalyModel
+from crowd_anomaly.data import discover_clips, find_subset_dir
+from crowd_anomaly.features import extract_many, clip_features
 
-Examples of Anomalies
+sub = find_subset_dir("UCSD_Anomaly_Dataset", "ped1")
+feats, size = extract_many(discover_clips(sub, "Train"), Config(), n_jobs=-1)
+model = CrowdAnomalyModel(Config(n_components=8)).fit(feats, size)
+model.save("models/ped1.joblib")
 
-| Peds1 : Cart                        | Peds1 : Wheelchair                  |
-| ----------------------------------- | ----------------------------------- |
-| ![vidf4_33_007_frame080_mark](https://github.com/priyanka011011/Crowd-Anomaly-Detection/assets/63203112/92aff7f9-a790-472d-b7f9-4211e4cf9147) |  ![vidf3_33_002_frame110_mark](https://github.com/priyanka011011/Crowd-Anomaly-Detection/assets/63203112/fe32f054-303d-44cb-bf29-2e7d6791beb9) |
+pred = CrowdAnomalyModel.load("models/ped1.joblib").predict(
+    clip_features("test.avi", model.cfg, model.frame_size))
+pred["scores"], pred["flags"], pred["cell_scores"]
+```
 
+The notebook `model.ipynb` walks through the same steps interactively. Without the dataset it falls back to synthetic data so every cell runs.
 
-| Peds1 : Skater                      | Peds1 : Biker                       |
-| ----------------------------------- | ----------------------------------- |
-| ![vidf1_33_008_frame130_mark](https://github.com/priyanka011011/Crowd-Anomaly-Detection/assets/63203112/5c060288-5138-43a0-9d24-787c8531a061)| ![vidf1_33_002_frame138_mark](https://github.com/priyanka011011/Crowd-Anomaly-Detection/assets/63203112/785b87bc-5a75-42ff-baad-4e949e10269f)|
+## Configuration
 
-## Papers
-- Anomaly Detection in Crowded Scenes
-   Vijay Mahadevan, Weixin Li, Viral Bhalodia and Nuno Vasconcelos.
-   In Proc. IEEE Conference on Computer Vision and Pattern Recognition (CVPR),
-   San Francisco, CA, 2010. 
-  - [pdf](http://www.svcl.ucsd.edu/publications/conference/2010/cvpr2010/cvpr_anomaly_2010.pdf)
-  - [BidTeX](http://www.svcl.ucsd.edu/publications/conference/2010/cvpr2010/cvpr_anomaly.bib)
-- Anomaly Detection and Localization in Crowded Scenes
-  Weixin Li, Vijay Mahadevan and Nuno Vasconcelos
-  IEEE Transactions on Pattern Analysis and Machine Intelligence (TPAMI)
-  Vol. 36, No. 1, pp18-32, January, 2014. 
-  - [pdf](http://www.svcl.ucsd.edu/publications/journal/2013/pami.anomaly/pami_anomaly.pdf)  
-  - [BitTeX](https://scholar.googleusercontent.com/scholar.bib?q=info:NyHX-w2VTwwJ:scholar.google.com/&output=citation&scisdr=Cm13Jnw7EMW_o_H15ao:AGlGAw8AAAAAZG7z_aoDnxf4jjNFfori1TUDp3Q&scisig=AGlGAw8AAAAAZG7z_RYIxRaV062HgyYdtuuMGoQ&scisf=4&ct=citation&cd=-1&hl=en)
+Everything lives in one `Config` dataclass, saved inside the model file so inference always uses the training settings.
 
-## Instruction how to use the model.ipynb
-To use the MDT model effectively, here are some essential recommendations for the client:
+| Setting | Default | Effect |
+|---|---|---|
+| `grid_rows`, `grid_cols` | 6, 8 | Spatial pooling resolution; finer grids localize better but are noisier |
+| `n_components` / `auto_components` | 8 / off | Mixture size, fixed or chosen by BIC from `component_candidates` |
+| `covariance_type`, `reg_covar` | `full`, 1e-4 | GMM covariance structure and regularisation |
+| `top_k` | 3 | Number of worst cells averaged into the frame score |
+| `smooth_sigma` | 2.0 | Temporal Gaussian smoothing of the frame score (0 = off) |
+| `val_fraction` | 0.2 | Share of training *clips* held out for thresholds |
+| `threshold_percentile` | 99.0 | Higher = fewer false alarms, lower recall |
+| `frame_size` | auto | Working resolution `(w, h)`; inferred from the first training frame |
+| `blur_ksize`, `flow_*` | 3, Farneback defaults | Preprocessing and optical-flow parameters |
+| `seed` | 0 | Reproducibility |
 
-- Training Data: Ensure that a diverse and representative dataset of crowd behavior is used for training the model. The training data should contain both normal and anomalous crowd behavior to capture a wide range of patterns.
+## Project structure
 
-- Feature Extraction: Use the extract_features function to extract optical flow features from the frames in the training data. Adjust the feature extraction process if needed, considering other relevant features or preprocessing techniques that might improve anomaly detection performance.
+```text
+Crowd-Anomaly-Detection/
+├── crowd_anomaly/
+│   ├── config.py        # Config dataclass + validation
+│   ├── data.py          # dataset discovery, frame/video reading, ground-truth parsing
+│   ├── features.py      # optical flow + grid pooling, parallel extraction
+│   ├── model.py         # CrowdAnomalyModel: fit / score / threshold / save / load
+│   ├── evaluate.py      # AUC, EER, precision/recall, plots
+│   ├── inference.py     # predict on video/folder; CSV, plot, annotated video
+│   ├── synthetic.py     # tiny synthetic UCSD-style dataset (tests and demo)
+│   └── cli.py           # python -m crowd_anomaly {train,evaluate,predict,demo}
+├── tests/test_pipeline.py
+├── load_predict.py      # backward-compatible entry point
+├── model.ipynb          # interactive walk-through
+├── requirements.txt / requirements-dev.txt
+└── README.md
+```
 
-- Training: Train the MDT model using the extracted features and the 'train_mdt_model' function. Experiment with different values for the num_components parameter to find the optimal number of components in the Gaussian Mixture Model. Consider using cross-validation techniques to evaluate and fine-tune the model.
+## Testing
 
-- Anomaly Score Computation: Compute the anomaly score for a new observation (frame) using the 'compute_anomaly_score' function. Provide the new observation as input, which should be preprocessed and converted into features using the extract_features function. The lower the anomaly score, the more normal the behavior, and higher scores indicate potential anomalies.
+```bash
+pip install -r requirements-dev.txt
+python -m pytest -q
+```
 
-- Threshold Selection: Determine an appropriate threshold for anomaly detection based on the specific requirements and characteristics of the crowd behavior. Evaluate the model's performance on validation or test data to find a threshold that balances detection accuracy and false positives/negatives.
+The 14 tests cover dataset discovery, ground-truth parsing (`.m` ranges and pixel masks), feature shapes, helper functions, model save/load round-trips, end-to-end detection on synthetic data, video input at a different resolution, `--auto-components`, and clean CLI error handling. They run on synthetic data only; they verify the code works, not how accurate it is on real footage.
 
-- Real-Time Monitoring: Integrate the trained model into a real-time monitoring system to detect anomalies in crowd behavior as it occurs. Continuously feed new frames into the model and monitor the anomaly scores to identify potential abnormal events promptly.
+## What changed from the original notebook
 
-- Model Evaluation and Refinement: Regularly evaluate the model's performance and retrain or refine it as needed. Collect feedback from the system's users and incorporate their insights to enhance the model's accuracy and adaptability.
+| Original | Now |
+|---|---|
+| `mdt_model.save('model.h5')` crashed (scikit-learn GMM has no `.save()`) | `joblib` persistence with version check, config, thresholds and frame size stored |
+| Hard-coded `D:\...` paths; 35 directories typed by hand (`Train020` twice) | `--data-root` plus automatic discovery |
+| Frames from all clips concatenated, so flow was computed across clip boundaries | Features computed per clip |
+| `extract_features` defined twice; first version collapsed flow to 2 numbers | One grid-pooled feature (dx, dy, magnitude per cell) |
+| Flattened full-resolution flow (~75k dims) fed to a GMM | 144 numbers per frame pair, modelled per cell (5-D) |
+| No threshold, no evaluation | Held-out-clip threshold; AUC, EER, precision/recall, plots |
+| Frame-level only, no localization | Cell scores drive an overlay on unusual regions |
+| Notebook only | Package, CLI, tests, demo |
+| `random` state not fixed | Seeded and reproducible |
 
+## Limitations
 
-- To use the given model follow the instructions below:
+- The model is **scene-specific**: a new camera, angle or lighting generally needs retraining.
+- A coarse optical-flow grid can miss small, slow or non-moving anomalies (e.g. a stationary abandoned object).
+- Localization is cell-level (default 6 x 8), not pixel-accurate, and is not yet evaluated against the pixel masks.
+- A high score means "unusual compared with training", not "dangerous". Keep a human in the loop and consider privacy and retention rules for any real deployment.
+- Real-time throughput was not benchmarked. Training was verified on Python 3.12 with synthetic data; run `train --evaluate` on the real dataset to see actual accuracy.
+- `joblib` files are pickles: only load models you trained or trust.
 
-     - Clone the repository using the following command
-   
-               git clone https://github.com/sanjeebtiwary/Crowd-Anomaly-Detection
-       
-     - Install the requirements using the below command
-  
-                pip install -r requirements.txt
-     
-     - Run 'load_predict.py' to run the model on given test.avi.
+## Roadmap
+
+- [ ] Publish a results table for Ped1 and Ped2 (AUC / EER)
+- [ ] Pixel-level localization evaluation against the `*_gt` masks
+- [ ] True Mixture of Dynamic Textures baseline for comparison
+- [ ] Richer features (flow histograms, temporal stacking of neighbouring frames)
+- [ ] Streaming/real-time mode with a causal (non-smoothed) score
+
+## References
+
+1. V. Mahadevan, W. Li, V. Bhalodia, N. Vasconcelos. "Anomaly Detection in Crowded Scenes." *IEEE CVPR*, 2010. [PDF](http://www.svcl.ucsd.edu/publications/conference/2010/cvpr2010/cvpr_anomaly_2010.pdf)
+2. W. Li, V. Mahadevan, N. Vasconcelos. "Anomaly Detection and Localization in Crowded Scenes." *IEEE TPAMI*, 36(1):18-32, 2014. [PDF](http://www.svcl.ucsd.edu/publications/journal/2013/pami.anomaly/pami_anomaly.pdf)
+3. Dataset: [UCSD Anomaly Dataset on Kaggle](https://www.kaggle.com/datasets/orvile/ucsd-anomaly-dataset/data) (original data from the UCSD Statistical Visual Computing Lab).
+
+## Contributing
+
+Fork, create a feature branch, make a focused change with tests (`python -m pytest`), and open a pull request describing the change and how you validated it.
+
+## License
+
+No license was specified in the supplied materials. Check the repository for a `LICENSE` file before reuse, and consider adding one (e.g. MIT or Apache-2.0). The UCSD dataset has its own terms of use.

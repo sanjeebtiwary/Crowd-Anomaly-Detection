@@ -43,7 +43,7 @@ def main():
     mdt_model = joblib.load('model.pkl')
 
     # Specify the directory path containing the frames to predict
-    frames_directory = 'D:/Data Set/Crowd Anomaly Detection/UCSD_Anomaly_Dataset/UCSDped1/Test/Test001'
+    frames_directory = 'D:/Data Set/Crowd Anomaly Detection/UCSD_Anomaly_Dataset/ped1/Test/Test001'
 
     # Initialize an empty list to store the frames
     frames = []

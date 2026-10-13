@@ -1,5 +1,7 @@
-numpy==1.21.5
-opencv_python==4.7.0.68
-scikit_image==0.19.2
-skimage==0.0
-tensorflow==2.10.0
+numpy>=1.23
+scipy>=1.9
+scikit-learn>=1.2
+opencv-python>=4.7
+joblib>=1.2
+matplotlib>=3.6
+tqdm>=4.64

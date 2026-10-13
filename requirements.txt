@@ -1,7 +1,1 @@
-numpy>=1.23
-scipy>=1.9
-scikit-learn>=1.2
-opencv-python>=4.7
-joblib>=1.2
-matplotlib>=3.6
-tqdm>=4.64
+-e .

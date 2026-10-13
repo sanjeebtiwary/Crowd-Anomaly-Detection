@@ -1,6 +1,6 @@
 """Normality model: standardiser + Gaussian mixture over per-cell motion.
 
-Every grid cell of every training frame is one sample ``[dx, dy, magnitude, y, x]``
+Every grid cell of every training frame is one sample ``[dx, dy, magnitude, (max, std), y, x]``
 (position included, so the model knows that motion near the camera looks different
 from motion far away). The anomaly score of a cell is its negative log-likelihood
 under the mixture; the frame score is the mean of the ``top_k`` worst cells,
@@ -25,7 +25,7 @@ FORMAT_VERSION = 1
 
 
 def cell_samples(feats: np.ndarray) -> np.ndarray:
-    """(T, R, C, 3) -> (T, R, C, 5) by appending normalised (y, x) cell centres."""
+    """(T, R, C, F) -> (T, R, C, F+2) by appending normalised (y, x) cell centres."""
     T, R, C, _ = feats.shape
     ys, xs = np.meshgrid((np.arange(R) + 0.5) / R, (np.arange(C) + 0.5) / C, indexing="ij")
     pos = np.broadcast_to(np.stack([ys, xs], axis=-1), (T, R, C, 2))
@@ -66,7 +66,7 @@ class CrowdAnomalyModel:
             raise RuntimeError("Model is not fitted")
 
     def _stack(self, clips: Sequence[np.ndarray]) -> np.ndarray:
-        return np.concatenate([cell_samples(f).reshape(-1, 5) for f in clips], axis=0)
+        return np.concatenate([cell_samples(f).reshape(-1, f.shape[-1] + 2) for f in clips], axis=0)
 
     def fit(
         self,
@@ -143,7 +143,7 @@ class CrowdAnomalyModel:
         """Negative log-likelihood per cell: (T, R, C). Higher = more unusual."""
         self._check_fitted()
         T, R, C, _ = feats.shape
-        Xs = self.scaler.transform(cell_samples(feats).reshape(-1, 5))
+        Xs = self.scaler.transform(cell_samples(feats).reshape(-1, feats.shape[-1] + 2))
         return (-self.gmm.score_samples(Xs)).reshape(T, R, C)
 
     def frame_scores(self, feats: np.ndarray, smooth: bool = True) -> np.ndarray:

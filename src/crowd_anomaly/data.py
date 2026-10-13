@@ -25,23 +25,26 @@ def _norm(name: str) -> str:
 
 
 def find_subset_dir(root: PathLike, subset: str) -> Path:
-    """Locate the folder for 'ped1' / 'ped2' (e.g. .../ped1) below ``root``.
+    """Locate the folder for 'ped1' / 'ped2' below ``root``.
 
-    Searches ``root`` and up to three levels beneath it, so it works whether
-    ``root`` is the Kaggle download folder, ``UCSD_Anomaly_Dataset`` or the
-    subset folder itself.
+    Accepts folders named ``UCSDped1``, ``UCSD_ped1`` or just ``ped1`` (case and
+    punctuation ignored) and searches ``root`` plus up to five levels beneath it,
+    so ``root`` can be the download folder, the dataset folder or the subset itself.
     """
     root = Path(root)
     if not root.exists():
-        raise FileNotFoundError(f"Data root does not exist: {root}")
-    key = f"ucsd{subset.lower()}"
-    candidates = [root, *root.glob("*"), *root.glob("*/*"), *root.glob("*/*/*")]
-    for p in candidates:
-        if p.is_dir() and _norm(p.name) == key:
-            return p
+        raise FileNotFoundError(f"Data root does not exist: {root.resolve()}")
+    keys = {f"ucsd{subset.lower()}", subset.lower()}
+    level = [root]
+    for _ in range(6):  # root + up to five levels below it
+        for p in level:
+            if _norm(p.name) in keys and p.is_dir():
+                return p
+        level = [c for p in level if p.is_dir() for c in sorted(p.iterdir()) if c.is_dir()]
+    found = sorted(p.name for p in root.iterdir() if p.is_dir())[:10]
     raise FileNotFoundError(
-        f"Could not find a folder named like 'UCSD{subset}' under {root}. "
-        "Point --data-root at the extracted dataset."
+        f"Could not find a '{subset}' / 'UCSD{subset}' folder under {root.resolve()}. "
+        f"Folders found there: {found}. Point the data root at the extracted dataset."
     )
 
 
@@ -173,15 +176,20 @@ def _clip_number(clip_dir: Path) -> Optional[int]:
 
 
 def find_gt_m_file(subset_dir: PathLike) -> Optional[Path]:
+    """Find the frame-level ground-truth ``.m`` file (e.g. ``UCSDped1.m``), if the download has one.
+
+    Searches below the subset folder and, failing that, below its parent (some copies keep
+    it next to the subset folder). Files named after the subset are preferred.
+    """
     subset_dir = Path(subset_dir)
-    folders = [subset_dir, *[p for p in subset_dir.iterdir() if p.is_dir()]]
-    for folder in folders:
-        found = sorted(folder.glob("*.m"))
-        if found:
-            return found[0]
-    # Some downloads keep it next to the subset folder (e.g. ped1.m).
-    sibling = sorted(subset_dir.parent.glob(f"{subset_dir.name}*.m"))
-    return sibling[0] if sibling else None
+    key = _norm(subset_dir.name).replace("ucsd", "")
+    for base in (subset_dir, subset_dir.parent):
+        found = sorted(base.rglob("*.m")) if base.exists() else []
+        found = [f for f in found if not f.name.startswith("._")]
+        preferred = [f for f in found if key in _norm(f.stem)]
+        if preferred or found:
+            return (preferred or found)[0]
+    return None
 
 
 def load_frame_labels(

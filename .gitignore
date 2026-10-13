@@ -1,9 +1,11 @@
 __pycache__/
 *.py[cod]
 .venv/
+.env
 .ipynb_checkpoints/
 .pytest_cache/
-models/
-reports/
+.feature_cache/
 outputs/
-*.joblib
+reports/
+*.mp4
+*.avi

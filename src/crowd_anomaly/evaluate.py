@@ -25,18 +25,16 @@ def compute_eer(y_true: np.ndarray, scores: np.ndarray) -> float:
     return float((fpr[i] + fnr[i]) / 2)
 
 
-def evaluate_clips(
-    model: CrowdAnomalyModel, clip_dirs: Sequence[Path], gt_ranges=None,
-    n_jobs: int = 1, progress: bool = True,
+def evaluate_features(
+    model: CrowdAnomalyModel, clip_dirs: Sequence[Path], feats: Sequence[np.ndarray], gt_ranges=None,
 ) -> Dict:
-    """Score labelled test clips and compute pooled + per-clip metrics."""
-    feats, _ = extract_many(clip_dirs, model.cfg, model.frame_size, n_jobs, progress)
-    per_clip, ys, ss = [], [], []
+    """Score precomputed clip features and compute pooled + per-clip metrics."""
+    per_clip, ys, ss, unlabeled = [], [], [], []
     for d, f in zip(clip_dirs, feats):
         pred = model.predict(f)
         labels = load_frame_labels(d, len(pred["scores"]), gt_ranges)
         if labels is None:
-            log.warning("No ground truth for %s; skipped", d.name)
+            unlabeled.append(d.name)
             continue
         entry = {"clip": d.name, "n_frames": int(len(labels)),
                  "n_anomalous": int(labels.sum()), "scores": pred["scores"], "labels": labels}
@@ -45,12 +43,19 @@ def evaluate_clips(
         per_clip.append(entry)
         ys.append(labels)
         ss.append(pred["scores"])
+    if unlabeled:
+        log.warning(
+            "No ground truth for %d of %d test clips (evaluating the other %d). Frame-level labels "
+            "come from the dataset's UCSDped*.m file, which this download appears to lack; pixel "
+            "masks exist only for a subset of clips. Pass --gt-file <path to .m> to use all clips.",
+            len(unlabeled), len(clip_dirs), len(per_clip))
     if not per_clip:
         raise RuntimeError("No test clips with ground truth were found")
 
     y, s = np.concatenate(ys), np.concatenate(ss)
-    result: Dict = {"n_clips": len(per_clip), "n_frames": int(len(y)),
-                    "n_anomalous_frames": int(y.sum()), "threshold": model.threshold_}
+    result: Dict = {"n_clips": len(per_clip), "n_clips_total": len(clip_dirs),
+                    "n_frames": int(len(y)), "n_anomalous_frames": int(y.sum()),
+                    "anomalous_fraction": float(y.mean()), "threshold": model.threshold_}
     if 0 < y.sum() < len(y):
         pred = (s > model.threshold_).astype(int)
         p, r, f1, _ = precision_recall_fscore_support(y, pred, average="binary", zero_division=0)
@@ -68,11 +73,28 @@ def evaluate_clips(
     return result
 
 
-def evaluate_dataset(model: CrowdAnomalyModel, data_root, subset: str, n_jobs: int = 1) -> Dict:
+def evaluate_clips(
+    model: CrowdAnomalyModel, clip_dirs: Sequence[Path], gt_ranges=None,
+    n_jobs: int = 1, progress: bool = True, cache_dir=None,
+) -> Dict:
+    """Extract features for ``clip_dirs`` and evaluate (see ``evaluate_features``)."""
+    feats, _ = extract_many(clip_dirs, model.cfg, model.frame_size, n_jobs, progress, cache_dir)
+    return evaluate_features(model, clip_dirs, feats, gt_ranges)
+
+
+def load_gt(subset_dir, gt_file=None):
+    """Parse the frame-level ground-truth ``.m`` (explicit path, else auto-detected)."""
+    f = Path(gt_file) if gt_file else find_gt_m_file(subset_dir)
+    if gt_file and not f.exists():
+        raise FileNotFoundError(f"--gt-file not found: {f}")
+    return parse_gt_m_file(f) if f else None
+
+
+def evaluate_dataset(model: CrowdAnomalyModel, data_root, subset: str, n_jobs: int = 1,
+                     gt_file=None, cache_dir=None) -> Dict:
     sub = find_subset_dir(data_root, subset)
-    gt_file = find_gt_m_file(sub)
-    gt = parse_gt_m_file(gt_file) if gt_file else None
-    return evaluate_clips(model, discover_clips(sub, "Test"), gt, n_jobs=n_jobs)
+    return evaluate_clips(model, discover_clips(sub, "Test"), load_gt(sub, gt_file),
+                          n_jobs=n_jobs, cache_dir=cache_dir)
 
 
 def save_report(result: Dict, out_dir) -> None:

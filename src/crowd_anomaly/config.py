@@ -24,6 +24,9 @@ class Config:
     # --- Spatial pooling -----------------------------------------------------
     grid_rows: int = 6
     grid_cols: int = 8
+    # "basic": mean dx, mean dy, mean magnitude per cell
+    # "rich":  basic + max magnitude + magnitude std (better for small, fast objects)
+    feature_set: str = "basic"
 
     # --- Normality model (Gaussian mixture over per-cell motion) -------------
     n_components: int = 8
@@ -55,6 +58,8 @@ class Config:
             raise ValueError("n_components must be >= 1")
         if not 0.0 <= self.val_fraction < 1.0:
             raise ValueError("val_fraction must be in [0, 1)")
+        if self.feature_set not in {"basic", "rich"}:
+            raise ValueError("feature_set must be 'basic' or 'rich'")
         if self.covariance_type not in {"full", "tied", "diag", "spherical"}:
             raise ValueError("invalid covariance_type")
         return self

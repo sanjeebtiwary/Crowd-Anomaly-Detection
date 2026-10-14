@@ -324,4 +324,4 @@ Fork, create a feature branch, make a focused change with tests (`python -m pyte
 
 ## License
 
-No license was specified in the supplied materials. Check the repository for a `LICENSE` file before reuse, and consider adding one (e.g. MIT or Apache-2.0). The UCSD dataset has its own terms of use.
+No license was specified. Check the repository for a `LICENSE` file before reuse, and consider adding one (e.g. MIT or Apache-2.0). The UCSD dataset has its own terms of use.

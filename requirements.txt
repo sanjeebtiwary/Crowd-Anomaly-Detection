@@ -1,1 +1,3 @@
--e .
+-e git+https://github.com/vinta/awesome-python.git#egg=awesome-python
+-e [app,main]
+-e [dev]

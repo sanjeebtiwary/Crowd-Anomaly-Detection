@@ -6,7 +6,7 @@ Any arguments you pass override the defaults (see `python -m crowd_anomaly predi
 import sys
 from pathlib import Path
 
-from crowd_anomaly.cli import main
+from src.cli import main
 
 if __name__ == "__main__":
     argv = sys.argv[1:]

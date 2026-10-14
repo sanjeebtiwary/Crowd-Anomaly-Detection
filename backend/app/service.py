@@ -1,7 +1,7 @@
 from functools import lru_cache
 import os
 from pathlib import Path
-from src.crowd_anomaly import CrowdAnomalyModel
+from src import CrowdAnomalyModel
 
 ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_MODEL = ROOT / "artifacts" / "ped1.joblib"

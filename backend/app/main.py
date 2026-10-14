@@ -3,8 +3,8 @@ import os
 import tempfile
 from fastapi import FastAPI, File, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from src.crowd_anomaly.features import clip_features
-from src.crowd_anomaly.model import flags_to_segments
+from src.features import clip_features
+from src.model import flags_to_segments
 from .schemas import PredictionResponse, Segment
 from .service import get_model
 

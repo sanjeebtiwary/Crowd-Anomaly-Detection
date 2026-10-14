@@ -1,13 +1,28 @@
+import shutil
+import sys
+import types
+
+import cv2
 import numpy as np
 import pytest
 
-from src.crowd_anomaly import Config, CrowdAnomalyModel
-from src.crowd_anomaly.data import (discover_clips, find_subset_dir, load_frame_labels,
-                                parse_gt_m_file, find_gt_m_file, prepare_frame)
-from src.crowd_anomaly.evaluate import compute_eer, evaluate_dataset
-from src.crowd_anomaly.features import extract_many, pool_flow
-from src.crowd_anomaly.inference import predict_source
-from src.crowd_anomaly.model import align_to_frames, flags_to_segments
+from src import Config, CrowdAnomalyModel
+from src.data import (
+    discover_clips,
+    find_gt_m_file,
+    find_subset_dir,
+    iter_frames,
+    load_frame_labels,
+    parse_gt_m_file,
+    prepare_frame,
+)
+from src.download import KAGGLE_HANDLE, resolve_data_root
+import src.features as F
+from src.evaluate import compute_eer, evaluate_dataset
+from src.features import extract_many, pool_flow
+from src.inference import predict_source
+from src.model import align_to_frames, flags_to_segments
+from src.cli import main
 from synthetic import make_synthetic_ucsd
 
 
@@ -108,7 +123,6 @@ def test_unfitted_and_bad_config():
 
 
 def test_single_frame_raises(tmp_path):
-    import cv2
     cv2.imwrite(str(tmp_path / "001.png"), np.zeros((20, 20), np.uint8))
     with pytest.raises(ValueError):
         extract_many([tmp_path], Config(), (20, 20), progress=False)
@@ -124,8 +138,6 @@ def test_auto_components(dataset):
 
 def test_video_file_at_different_resolution(trained, dataset, tmp_path):
     """A .avi at 2x the training resolution must be resized and scored."""
-    import cv2
-    from src.crowd_anomaly.data import iter_frames
     clip = discover_clips(find_subset_dir(dataset, "ped1"), "Test")[0]
     video = tmp_path / "test.avi"
     w, h = trained.frame_size
@@ -140,14 +152,12 @@ def test_video_file_at_different_resolution(trained, dataset, tmp_path):
 
 
 def test_cli_errors_cleanly(tmp_path):
-    from crowd_anomaly.cli import main
     assert main(["train", "--data-root", str(tmp_path / "missing")]) == 1
     assert main(["predict", "--source", "nope.avi", "--model", str(tmp_path / "nope.joblib")]) == 1
 
 
 def test_subset_folder_named_just_ped1(tmp_path):
     """Kaggle-style layout: dataset/ped1/{Train,Test} (no 'UCSD' prefix)."""
-    import shutil
     src = make_synthetic_ucsd(tmp_path / "src")
     dst = tmp_path / "dataset" / "ped1"
     shutil.copytree(src, dst)
@@ -160,21 +170,17 @@ def test_subset_folder_named_just_ped1(tmp_path):
 
 def test_resolve_data_root_uses_kagglehub(tmp_path, monkeypatch):
     """No --data-root -> kagglehub.dataset_download('orvile/ucsd-anomaly-dataset')."""
-    import sys, types
-    from crowd_anomaly.download import resolve_data_root, KAGGLE_HANDLE
     calls = []
     fake = types.ModuleType("kagglehub")
     fake.dataset_download = lambda handle, force_download=False: calls.append(handle) or str(tmp_path)
     monkeypatch.setitem(sys.modules, "kagglehub", fake)
     assert resolve_data_root(None) == tmp_path and calls == [KAGGLE_HANDLE]
-    assert resolve_data_root("local") .name == "local" and len(calls) == 1  # explicit path wins
+    assert resolve_data_root("local").name == "local" and len(calls) == 1  # explicit path wins
 
 
 def test_cli_train_downloads_from_kaggle(tmp_path, monkeypatch):
     """End to end: train + evaluate with the dataset 'downloaded' by a stubbed kagglehub,
     nested like a real Kaggle cache (versions/1/dataset/ped1/...)."""
-    import shutil, sys, types
-    from crowd_anomaly.cli import main
     cache = tmp_path / "cache" / "versions" / "1"
     shutil.copytree(make_synthetic_ucsd(tmp_path / "src"), cache / "dataset" / "ped1")
     fake = types.ModuleType("kagglehub")
@@ -193,14 +199,14 @@ def test_cli_train_downloads_from_kaggle(tmp_path, monkeypatch):
 # --------------------------------------------------------------------------- #
 def test_rich_features_capture_small_fast_objects():
     flow = np.zeros((60, 80, 2), np.float32)
-    flow[10:13, 10:13, 0] = 8.0                       # tiny fast patch inside one 10x10 cell
+    flow[10:13, 10:13, 0] = 8.0  # tiny fast patch inside one 10x10 cell
     basic = pool_flow(flow, 6, 8, "basic")
     rich = pool_flow(flow, 6, 8, "rich")
     assert basic.shape == (6, 8, 3) and rich.shape == (6, 8, 5)
     assert np.allclose(rich[..., :3], basic)
-    assert rich[1, 1, 3] == pytest.approx(8.0)        # max magnitude survives pooling
-    assert rich[1, 1, 3] > 10 * basic[1, 1, 2]        # ...while the mean dilutes it
-    assert rich[1, 1, 4] > 0 and rich[3, 5, 4] == 0   # std only where there is variation
+    assert rich[1, 1, 3] == pytest.approx(8.0)  # max magnitude survives pooling
+    assert rich[1, 1, 3] > 10 * basic[1, 1, 2]  # ...while the mean dilutes it
+    assert rich[1, 1, 4] > 0 and rich[3, 5, 4] == 0  # std only where there is variation
 
 
 def test_rich_model_trains_and_detects(dataset):
@@ -213,7 +219,6 @@ def test_rich_model_trains_and_detects(dataset):
 
 
 def test_feature_cache_hits_and_invalidates(dataset, tmp_path, monkeypatch):
-    import crowd_anomaly.features as F
     sub = find_subset_dir(dataset, "ped1")
     clip = discover_clips(sub, "Train")[0]
     calls = []
@@ -222,11 +227,11 @@ def test_feature_cache_hits_and_invalidates(dataset, tmp_path, monkeypatch):
     cfg = Config()
     a = F.clip_features(clip, cfg, (160, 120), tmp_path)
     b = F.clip_features(clip, cfg, (160, 120), tmp_path)
-    assert len(calls) == 1 and np.array_equal(a, b)                    # second call came from cache
+    assert len(calls) == 1 and np.array_equal(a, b)  # second call came from cache
     F.clip_features(clip, Config(grid_rows=4, grid_cols=4), (160, 120), tmp_path)
-    assert len(calls) == 2                                              # different grid -> recompute
+    assert len(calls) == 2  # different grid -> recompute
     F.clip_features(clip, cfg, (160, 120), None)
-    assert len(calls) == 3                                              # cache disabled
+    assert len(calls) == 3  # cache disabled
 
 
 def test_missing_gt_file_uses_masks_then_gt_file_covers_all(tmp_path, caplog):
@@ -263,7 +268,6 @@ def test_find_gt_m_file_searches_recursively(tmp_path):
 
 
 def test_cli_sweep_ranks_settings(dataset, tmp_path):
-    from crowd_anomaly.cli import main
     out = tmp_path / "sweep.csv"
     rc = main(["sweep", "--data-root", str(dataset), "--subset", "ped1",
                "--grids", "6x8", "--feature-sets", "basic,rich", "--components", "4",
@@ -271,6 +275,6 @@ def test_cli_sweep_ranks_settings(dataset, tmp_path):
                "--cache-dir", str(tmp_path / "cache"), "--out", str(out)])
     assert rc == 0
     lines = out.read_text().strip().splitlines()
-    assert len(lines) == 1 + 4                                   # header + 2 feature sets x 2 top_k
+    assert len(lines) == 1 + 4  # header + 2 feature sets x 2 top_k
     aucs = [float(l.split(",")[5]) for l in lines[1:]]
     assert aucs == sorted(aucs, reverse=True) and aucs[0] > 0.9

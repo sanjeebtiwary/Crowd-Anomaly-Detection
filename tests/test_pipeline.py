@@ -1,13 +1,13 @@
 import numpy as np
 import pytest
 
-from crowd_anomaly import Config, CrowdAnomalyModel
-from crowd_anomaly.data import (discover_clips, find_subset_dir, load_frame_labels,
+from src.crowd_anomaly import Config, CrowdAnomalyModel
+from src.crowd_anomaly.data import (discover_clips, find_subset_dir, load_frame_labels,
                                 parse_gt_m_file, find_gt_m_file, prepare_frame)
-from crowd_anomaly.evaluate import compute_eer, evaluate_dataset
-from crowd_anomaly.features import extract_many, pool_flow
-from crowd_anomaly.inference import predict_source
-from crowd_anomaly.model import align_to_frames, flags_to_segments
+from src.crowd_anomaly.evaluate import compute_eer, evaluate_dataset
+from src.crowd_anomaly.features import extract_many, pool_flow
+from src.crowd_anomaly.inference import predict_source
+from src.crowd_anomaly.model import align_to_frames, flags_to_segments
 from synthetic import make_synthetic_ucsd
 
 
@@ -125,7 +125,7 @@ def test_auto_components(dataset):
 def test_video_file_at_different_resolution(trained, dataset, tmp_path):
     """A .avi at 2x the training resolution must be resized and scored."""
     import cv2
-    from crowd_anomaly.data import iter_frames
+    from src.crowd_anomaly.data import iter_frames
     clip = discover_clips(find_subset_dir(dataset, "ped1"), "Test")[0]
     video = tmp_path / "test.avi"
     w, h = trained.frame_size

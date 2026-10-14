@@ -6,6 +6,5 @@ __pycache__/
 .pytest_cache/
 .feature_cache/
 outputs/
-reports/
 *.mp4
 *.avi

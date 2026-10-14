@@ -1,8 +1,3 @@
-"""Tiny synthetic dataset in the UCSD folder layout, for smoke tests and demos.
-
-NOT a substitute for the real data: slow textured blocks ("pedestrians") walk
-along a band; anomalous test frames add a much faster, larger block ("cyclist").
-"""
 from __future__ import annotations
 
 from pathlib import Path

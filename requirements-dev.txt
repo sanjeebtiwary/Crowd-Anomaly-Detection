@@ -1,1 +1,2 @@
--e .[api,dev]
+# Everything, plus test tooling
+-e .[api,ui,dev]

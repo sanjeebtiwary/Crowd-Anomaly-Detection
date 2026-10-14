@@ -1,9 +1,12 @@
-from pydantic import BaseModel, Field
 from typing import List
+
+from pydantic import BaseModel, Field
+
 
 class Segment(BaseModel):
     start_frame: int
     end_frame: int
+
 
 class PredictionResponse(BaseModel):
     filename: str

@@ -1,1 +1,2 @@
+# Core + FastAPI backend
 -e .[api]

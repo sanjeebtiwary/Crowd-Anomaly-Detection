@@ -1,14 +1,16 @@
-from functools import lru_cache
-import os
-from pathlib import Path
-from src import CrowdAnomalyModel
+from __future__ import annotations
 
-ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_MODEL = ROOT / "artifacts" / "ped1.joblib"
+from functools import lru_cache
+
+from crowd_anomaly import CrowdAnomalyModel
+
+from .settings import get_settings
+
 
 @lru_cache(maxsize=1)
 def get_model() -> CrowdAnomalyModel:
-    model_path = Path(os.getenv("MODEL_PATH", str(DEFAULT_MODEL))).expanduser()
-    if not model_path.is_file():
-        raise FileNotFoundError(f"Model artifact not found: {model_path}")
-    return CrowdAnomalyModel.load(model_path)
+    """Load the trained model once and reuse it for every request."""
+    path = get_settings().model_path
+    if not path.is_file():
+        raise FileNotFoundError(f"Model artifact not found: {path}")
+    return CrowdAnomalyModel.load(path)

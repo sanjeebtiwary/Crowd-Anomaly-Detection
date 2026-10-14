@@ -5,9 +5,12 @@ import types
 import cv2
 import numpy as np
 import pytest
+from synthetic import make_synthetic_ucsd
 
-from src import Config, CrowdAnomalyModel
-from src.data import (
+import crowd_anomaly.features as F
+from crowd_anomaly import Config, CrowdAnomalyModel
+from crowd_anomaly.cli import main
+from crowd_anomaly.data import (
     discover_clips,
     find_gt_m_file,
     find_subset_dir,
@@ -16,14 +19,11 @@ from src.data import (
     parse_gt_m_file,
     prepare_frame,
 )
-from src.download import KAGGLE_HANDLE, resolve_data_root
-import src.features as F
-from src.evaluate import compute_eer, evaluate_dataset
-from src.features import extract_many, pool_flow
-from src.inference import predict_source
-from src.model import align_to_frames, flags_to_segments
-from src.cli import main
-from synthetic import make_synthetic_ucsd
+from crowd_anomaly.download import KAGGLE_HANDLE, resolve_data_root
+from crowd_anomaly.evaluate import compute_eer, evaluate_dataset
+from crowd_anomaly.features import extract_many, pool_flow
+from crowd_anomaly.inference import predict_source
+from crowd_anomaly.model import align_to_frames, flags_to_segments
 
 
 @pytest.fixture(scope="module")
@@ -88,7 +88,6 @@ def test_helpers():
 
 
 def test_anomalies_score_higher(dataset, trained):
-    sub = find_subset_dir(dataset, "ped1")
     res = evaluate_dataset(trained, dataset, "ped1")
     assert res["n_clips"] == 4
     assert res["auc"] > 0.9
@@ -276,5 +275,5 @@ def test_cli_sweep_ranks_settings(dataset, tmp_path):
     assert rc == 0
     lines = out.read_text().strip().splitlines()
     assert len(lines) == 1 + 4  # header + 2 feature sets x 2 top_k
-    aucs = [float(l.split(",")[5]) for l in lines[1:]]
+    aucs = [float(line.split(",")[5]) for line in lines[1:]]
     assert aucs == sorted(aucs, reverse=True) and aucs[0] > 0.9

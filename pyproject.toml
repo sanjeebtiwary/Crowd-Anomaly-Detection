@@ -4,26 +4,46 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "crowd-anomaly-detection"
-version = "1.1.0"
-description = "Optical-flow based crowd anomaly detection with a FastAPI backend"
+dynamic = ["version"]
+description = "Optical-flow based crowd anomaly detection with a FastAPI backend and Streamlit UI"
 readme = "README.md"
 requires-python = ">=3.10"
 dependencies = [
-  "numpy>=1.23", "scipy>=1.9", "scikit-learn==1.7.2",
-  "opencv-python-headless>=4.7", "joblib>=1.2", "matplotlib>=3.6",
-  "tqdm>=4.64", "kagglehub>=0.3"
+  "numpy>=1.23",
+  "scipy>=1.9",
+  # Pinned: artifacts/ped1.joblib was pickled with this version. Retrain to upgrade.
+  "scikit-learn==1.7.2",
+  "opencv-python-headless>=4.7",
+  "joblib>=1.2",
+  "matplotlib>=3.6",
+  "tqdm>=4.64",
+  "kagglehub>=0.3",
 ]
 
 [project.optional-dependencies]
-api = ["fastapi>=0.110", "uvicorn[standard]>=0.27", "python-multipart>=0.0.9"]
-dev = ["pytest>=7.0", "httpx>=0.27", "jupyter"]
+api = ["fastapi>=0.110", "uvicorn[standard]>=0.27", "python-multipart>=0.0.9", "python-dotenv>=1.0"]
+ui = ["streamlit>=1.49", "requests>=2.31", "pandas>=2.0"]
+dev = ["pytest>=7.0", "httpx>=0.27", "ruff>=0.5"]
+notebook = ["jupyter"]
 
-[tool.setuptools]
-package-dir = {"" = "src"}
+[project.scripts]
+crowd-anomaly = "crowd_anomaly.cli:main"
+
+[tool.setuptools.dynamic]
+version = { attr = "crowd_anomaly.__version__" }
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.pytest.ini_options]
-pythonpath = ["src", "tests"]
+# "src" lets tests run without installing; "." exposes the `backend` package.
+pythonpath = ["src", "tests", "."]
 testpaths = ["tests"]
+
+[tool.ruff]
+line-length = 120
+target-version = "py310"
+extend-exclude = ["notebooks"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]

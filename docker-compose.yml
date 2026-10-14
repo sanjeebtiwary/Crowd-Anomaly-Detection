@@ -1,0 +1,22 @@
+services:
+  api:
+    build: .
+    env_file: [.env]
+    environment:
+      MODEL_PATH: /app/artifacts/ped1.joblib   # inside the container
+      PORT: "8000"
+    ports: ["${PORT:-8000}:8000"]
+    volumes:
+      - ./artifacts:/app/artifacts:ro
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    environment:
+      API_URL: http://api:8000               # service name on the compose network
+      API_TIMEOUT: ${API_TIMEOUT:-300}
+    ports: ["${UI_PORT:-8501}:8501"]
+    depends_on: [api]
+    restart: unless-stopped

@@ -1,10 +1,28 @@
+# Python
 __pycache__/
 *.py[cod]
+*.egg-info/
+build/
+dist/
 .venv/
+venv/
+
+# Secrets / local config
 .env
-.ipynb_checkpoints/
+
+# Tooling caches
 .pytest_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+.idea/
+.vscode/
+
+# Generated data
 .feature_cache/
 outputs/
+models/
 *.mp4
 *.avi
+
+# Keep the shipped inference model
+!artifacts/ped1.joblib

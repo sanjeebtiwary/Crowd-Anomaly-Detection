@@ -3,10 +3,10 @@
 **Flag unusual events in pedestrian-scene surveillance video by learning what "normal" motion looks like.**
 
 [![GitHub](https://img.shields.io/badge/GitHub-Repository-181717?style=for-the-badge&logo=github)](https://github.com/sanjeebtiwary/Crowd-Anomaly-Detection)
-![Python](https://img.shields.io/badge/Python-3.9%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)
+![Python](https://img.shields.io/badge/Python-3.10%2B-3776AB?style=for-the-badge&logo=python&logoColor=white)
 ![OpenCV](https://img.shields.io/badge/OpenCV-Optical%20Flow-5C3EE8?style=for-the-badge&logo=opencv&logoColor=white)
 ![scikit-learn](https://img.shields.io/badge/scikit--learn-GMM-F7931E?style=for-the-badge&logo=scikitlearn&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-23%20passing-2EA44F?style=for-the-badge)
+![Tests](https://img.shields.io/badge/tests-26%20passing-2EA44F?style=for-the-badge)
 
 ---
 
@@ -21,10 +21,11 @@ Abnormal events in crowds can't be enumerated in advance, so this project uses a
 It provides:
 
 - **one-step dataset download** from Kaggle with `kagglehub` (no manual download or folder setup)
-- a reusable Python package (`crowd_anomaly/`) and a command line (`download`, `train`, `evaluate`, `predict`)
+- a reusable Python package (`src/crowd_anomaly/`) and a command line (`download`, `train`, `evaluate`, `predict`)
 - frame-level evaluation (ROC-AUC, EER, precision/recall) with plots
 - anomaly **localization overlays**: annotated output video highlights the cells that look unusual
 - models that accept **any video** (`.avi`, `.mp4`, ...) or folder of frames, resized automatically
+- a FastAPI backend and a Streamlit dashboard
 - a test suite (runs offline on generated data)
 
 > **Results.** No UCSD accuracy figures are published here yet. Run `train --evaluate` on your copy of the data and report your own numbers (see [Roadmap](#roadmap)).
@@ -59,60 +60,84 @@ cd Crowd-Anomaly-Detection
 
 python -m venv .venv
 source .venv/bin/activate            # Windows: .venv\Scripts\Activate.ps1
-pip install -r requirements.txt
+pip install -r requirements.txt      # installs the package in editable mode (Python 3.10+)
+cp .env .env                 # optional: API / UI settings
 
 # Downloads the dataset from Kaggle automatically, trains, and evaluates
 python -m crowd_anomaly train --subset ped1 --model-out models/ped1.joblib --evaluate
 ```
 
-No dataset setup is needed: when `--data-root` is omitted, the dataset is fetched with `kagglehub` and cached locally, so later runs reuse it.
+No dataset setup is needed: when `--data-root` is omitted, the dataset is fetched with `kagglehub` and cached locally, so later runs reuse it. Requirements files: `requirements.txt` (library + CLI), `requirements-api.txt` (+ FastAPI), `requirements-ui.txt` (+ Streamlit), `requirements-dev.txt` (everything + test tools). All versions are defined in `pyproject.toml`.
 
 ## Project structure
 
 ```text
 Crowd-Anomaly-Detection/
-├── backend/
-│   └── app/                 # FastAPI routes, request/response schemas, model service
-├── src/
-│   └── crowd_anomaly/       # Reusable ML package and CLI
-├── artifacts/               # Trained model artifact(s) required for inference
-├── assets/                   # README diagrams and images
-├── tests/                    # Automated pipeline tests
-├── reports/                  # Evaluation reports (generated/optional)
-├── model.ipynb               # Research/experimentation notebook
-├── pyproject.toml            # Package and dependency configuration
-├── Dockerfile                # Container deployment for API
-└── requirements-api.txt      # API installation shortcut
+├── src/crowd_anomaly/       # ML package + CLI (python -m crowd_anomaly ...)
+│   ├── config.py            # Config dataclass + validation
+│   ├── download.py          # kagglehub download of the UCSD dataset
+│   ├── data.py              # dataset discovery, frame/video reading, ground truth
+│   ├── features.py          # optical flow + grid pooling, parallel extraction, cache
+│   ├── model.py             # CrowdAnomalyModel: fit / score / threshold / save / load
+│   ├── evaluate.py          # AUC, EER, precision/recall, plots
+│   ├── inference.py         # predict on video/folder; CSV, plot, annotated video
+│   └── cli.py               # train | evaluate | sweep | predict | download
+├── backend/app/             # FastAPI: main.py (routes), settings.py (env), service.py, schemas.py
+├── frontend/app.py          # Streamlit dashboard that calls the API
+├── artifacts/ped1.joblib    # trained model used by the API (scikit-learn 1.7.2)
+├── tests/                   # pipeline + API tests (offline, synthetic data)
+├── notebooks/model.ipynb    # interactive walk-through
+├── reports/ped1/            # example evaluation output (partial ground truth, see below)
+├── assets/                  # README images
+├── load_predict.py          # convenience wrapper around `predict`
+├── .env.example             # environment variables (copy to .env)
+├── Dockerfile               # API image          Dockerfile.frontend  # UI image
+├── docker-compose.yml       # API + UI together
+├── pyproject.toml           # package metadata, dependencies, pytest/ruff config
+└── requirements*.txt        # install shortcuts
 ```
 
 ## Backend API (FastAPI)
 
-The backend is separate from the model code. It loads `artifacts/ped1.joblib` once and exposes a video-upload endpoint. It does not require a local frontend.
-
-### Run locally
+The backend loads `artifacts/ped1.joblib` once at startup and exposes a video-upload endpoint.
 
 ```bash
-python -m venv .venv
-# Windows PowerShell: .\.venv\Scripts\Activate.ps1
-# macOS/Linux: source .venv/bin/activate
 pip install -r requirements-api.txt
+cp .env .env
 uvicorn backend.app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-Open `http://127.0.0.1:8000/docs` to try `POST /predict`. Upload an MP4/AVI/MOV/MKV video. `GET /health` checks whether the trained model loaded. Configure `MODEL_PATH` if the model artifact is stored elsewhere, `CORS_ORIGINS` as a comma-separated list of frontend origins, and `MAX_UPLOAD_MB` to change the upload limit.
+Open `http://127.0.0.1:8000/docs` to try `POST /predict` (MP4/AVI/MOV/MKV...). `GET /health` reports whether the model loaded.
 
-### Deploy with Docker
+| Variable | Default | Purpose |
+|---|---|---|
+| `MODEL_PATH` | `artifacts/ped1.joblib` | Trained model (relative paths resolve from the repo root) |
+| `CORS_ORIGINS` | `*` | Comma-separated allowed browser origins; restrict in production |
+| `MAX_UPLOAD_MB` | `100` | Upload limit (uploads are streamed to a temp file, then deleted) |
+| `MIN_SEGMENT_LEN` | `3` | Shortest run of flagged frames reported as a segment |
+| `PORT` | `8000` | Port used by the Docker image |
+
+`POST /predict` returns `frames_processed`, `threshold`, per-frame `scores` and `flags`, `anomaly_frames`, `anomaly_detected`, and inclusive frame-index `segments`. Videos are processed synchronously, so long videos can hit host CPU/timeout limits.
+
+## Streamlit dashboard
 
 ```bash
-docker build -t crowd-anomaly-api .
-docker run --rm -p 8000:8000 crowd-anomaly-api
+pip install -r requirements-ui.txt
+API_URL=http://localhost:8000 streamlit run frontend/app.py
 ```
 
-For a cloud host that supports Docker, deploy this repository using the included `Dockerfile`. The API needs the model artifact in the image or mounted at `MODEL_PATH`. Free hosting tiers and video-processing limits can change; large uploads or long videos may exceed a provider's CPU, memory, request-timeout, or storage limits. This API processes videos synchronously and keeps uploads only in temporary storage.
+`API_URL` and `API_TIMEOUT` can also be set in `.env` or in the sidebar.
 
-### API response
+## Docker
 
-`POST /predict` returns `frames_processed`, `threshold`, per-frame `scores` and `flags`, `anomaly_frames`, `anomaly_detected`, and inclusive frame-index `segments`. This initial API returns scores as JSON; it does not persist uploaded videos or generate annotated videos.
+```bash
+cp .env .env
+docker compose up --build        # API on :8000, dashboard on :8501
+# API only:
+docker build -t crowd-anomaly-api . && docker run --rm -p 8000:8000 crowd-anomaly-api
+```
+
+The model is baked into the API image and also mounted read-only from `./artifacts` by compose, so you can swap in a retrained model without rebuilding. Containers run as a non-root user.
 
 ## Dataset
 
@@ -144,12 +169,12 @@ The `ped1` / `ped2` folders (also accepted as `UCSDped1` / `UCSDped2`) are locat
 
 <table>
   <tr>
-    <td align="center" width="50%"><strong>Cart</strong><br><img src="https://github.com/priyanka011011/Crowd-Anomaly-Detection/assets/63203112/92aff7f9-a790-472d-b7f9-4211e4cf9147" alt="Cart anomaly in Ped1" width="100%"></td>
-    <td align="center" width="50%"><strong>Wheelchair</strong><br><img src="https://github.com/priyanka011011/Crowd-Anomaly-Detection/assets/63203112/fe32f054-303d-44cb-bf29-2e7d6791beb9" alt="Wheelchair anomaly in Ped1" width="100%"></td>
+    <td align="center" width="50%"><strong>Cart</strong><br><img src="assets/anomaly-cart.png" alt="Cart anomaly in Ped1" width="100%"></td>
+    <td align="center" width="50%"><strong>Wheelchair</strong><br><img src="assets/anomaly-wheelchair.png" alt="Wheelchair anomaly in Ped1" width="100%"></td>
   </tr>
   <tr>
-    <td align="center" width="50%"><strong>Skater</strong><br><img src="https://github.com/priyanka011011/Crowd-Anomaly-Detection/assets/63203112/5c060288-5138-43a0-9d24-787c8531a061" alt="Skater anomaly in Ped1" width="100%"></td>
-    <td align="center" width="50%"><strong>Biker</strong><br><img src="https://github.com/priyanka011011/Crowd-Anomaly-Detection/assets/63203112/785b87bc-5a75-42ff-baad-4e949e10269f" alt="Biker anomaly in Ped1" width="100%"></td>
+    <td align="center" width="50%"><strong>Skater</strong><br><img src="assets/anomaly-skater.png" alt="Skater anomaly in Ped1" width="100%"></td>
+    <td align="center" width="50%"><strong>Biker</strong><br><img src="assets/anomaly-biker.png" alt="Biker anomaly in Ped1" width="100%"></td>
   </tr>
 </table>
 
@@ -168,6 +193,8 @@ Useful options: `--components 12`, `--auto-components` (choose by BIC), `--grid 
 ```bash
 python -m crowd_anomaly evaluate --subset ped1 --model models/ped1.joblib --report-dir reports/ped1
 ```
+
+`reports/ped1/` ships an example run scored on only 10 of 36 test clips (no `.m` ground-truth file in that download): AUC 0.658, EER 0.384. It is **not** comparable with published full-test-set numbers.
 
 Writes `metrics.json` (AUC, EER, average precision, precision/recall/F1 at the calibrated threshold, per-clip AUC), `roc.png` and `timelines.png`. AUC and EER are computed over frames pooled across all labelled test clips, the usual UCSD frame-level protocol.
 
@@ -199,7 +226,7 @@ Results go to `reports/sweep.csv`. **Caveat:** this ranks settings on the test l
 
 ```bash
 python -m crowd_anomaly predict --source test.avi --model models/ped1.joblib --out outputs/
-# or the original entry point, which defaults to test.avi + models/model.joblib:
+# or the wrapper, which defaults to test.avi + artifacts/ped1.joblib (override with MODEL_PATH):
 python load_predict.py
 ```
 
@@ -223,7 +250,7 @@ pred = CrowdAnomalyModel.load("models/ped1.joblib").predict(
 pred["scores"], pred["flags"], pred["cell_scores"]
 ```
 
-The notebook `model.ipynb` walks through the same steps interactively, starting with the Kaggle download.
+The notebook `notebooks/model.ipynb` walks through the same steps interactively, starting with the Kaggle download.
 
 ## Configuration
 
@@ -243,34 +270,15 @@ Everything lives in one `Config` dataclass, saved inside the model file so infer
 | `blur_ksize`, `flow_*` | 3, Farneback defaults | Preprocessing and optical-flow parameters |
 | `seed` | 0 | Reproducibility |
 
-## Project structure
-
-```text
-Crowd-Anomaly-Detection/
-├── crowd_anomaly/
-│   ├── config.py        # Config dataclass + validation
-│   ├── download.py      # kagglehub download of the UCSD dataset
-│   ├── data.py          # dataset discovery, frame/video reading, ground-truth parsing
-│   ├── features.py      # optical flow + grid pooling, parallel extraction
-│   ├── model.py         # CrowdAnomalyModel: fit / score / threshold / save / load
-│   ├── evaluate.py      # AUC, EER, precision/recall, plots
-│   ├── inference.py     # predict on video/folder; CSV, plot, annotated video
-│   └── cli.py           # python -m crowd_anomaly {download,train,evaluate,predict}
-├── tests/               # test_pipeline.py + synthetic.py (offline test data)
-├── load_predict.py      # backward-compatible entry point
-├── model.ipynb          # interactive walk-through
-├── requirements.txt / requirements-dev.txt
-└── README.md
-```
-
 ## Testing
 
 ```bash
 pip install -r requirements-dev.txt
 python -m pytest -q
+ruff check src backend frontend tests
 ```
 
-The 23 tests run offline on generated data and cover dataset discovery (including Kaggle-style nested folders), ground-truth parsing and fallbacks (`.m` ranges, pixel masks, `--gt-file`), feature shapes and the rich features, the feature cache, model save/load, end-to-end detection, the `kagglehub` download path (stubbed), the `sweep` command, video input at a different resolution, and CLI error handling. They verify the code works, not how accurate it is on real footage.
+The 26 tests run offline on generated data and cover dataset discovery (including Kaggle-style nested folders), ground-truth parsing and fallbacks (`.m` ranges, pixel masks, `--gt-file`), feature shapes and the rich features, the feature cache, model save/load, end-to-end detection, the `kagglehub` download path (stubbed), the `sweep` command, video input at a different resolution, CLI error handling, and the HTTP API (health, upload, validation). They verify the code works, not how accurate it is on real footage.
 
 ## What changed from the original notebook
 
@@ -293,7 +301,7 @@ The 23 tests run offline on generated data and cover dataset discovery (includin
 - A coarse optical-flow grid can miss small, slow or non-moving anomalies (e.g. a stationary abandoned object).
 - Localization is cell-level (default 6 x 8), not pixel-accurate, and is not yet evaluated against the pixel masks.
 - A high score means "unusual compared with training", not "dangerous". Keep a human in the loop and consider privacy and retention rules for any real deployment.
-- Real-time throughput was not benchmarked. The code was tested on Python 3.12 with generated data; run `train --evaluate` on the real dataset to see actual accuracy.
+- Real-time throughput was not benchmarked. The code was tested on Python 3.12 (CI also runs 3.10) with generated data; run `train --evaluate` on the real dataset to see actual accuracy.
 - `joblib` files are pickles: only load models you trained or trust.
 
 ## Roadmap
